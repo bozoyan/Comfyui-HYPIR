@@ -46,6 +46,7 @@ class HYPIRAdvancedRestoration:
                 "encode_patch_size": ("INT", {"default": 512, "min": 256, "max": 1024, "step": 64}),
                 "decode_patch_size": ("INT", {"default": 512, "min": 256, "max": 1024, "step": 64}),
                 "batch_size": ("INT", {"default": 1, "min": 1, "max": 8, "step": 1}),
+                "unload_model_after": ("BOOLEAN", {"default": False}),
             },
         }
     
@@ -76,19 +77,19 @@ class HYPIRAdvancedRestoration:
                     absolute_path = os.path.join(models_dir, weight_path)
                     if os.path.exists(absolute_path):
                         weight_path = absolute_path
-                        print(f"找到模型: {weight_path}")
+                        print(f"Found model: {weight_path}")
                     else:
-                        print(f"模型文件不存在: {absolute_path}")
+                        print(f"Model file not found: {absolute_path}")
                         raise ValueError(f"Model file not found: {absolute_path}")
                     break
                 current_dir = parent
             else:
-                print("无法找到ComfyUI models目录")
+                print("Could not find ComfyUI models directory")
                 raise ValueError("Could not find ComfyUI models directory")
         else:
             # 已经是绝对路径，检查是否存在
             if not os.path.exists(weight_path):
-                print(f"模型文件不存在: {weight_path}")
+                print(f"Model file not found: {weight_path}")
                 raise ValueError(f"Model file not found: {weight_path}")
         
         try:
@@ -109,7 +110,7 @@ class HYPIRAdvancedRestoration:
     
     def restore_image_advanced(self, image, prompt, upscale_factor, seed, model_name, 
                              base_model_path, model_t, coeff_t, lora_rank, patch_size,
-                             encode_patch_size, decode_patch_size, batch_size):
+                             encode_patch_size, decode_patch_size, batch_size, unload_model_after=False):
         # Set seed if provided
         if seed != -1:
             torch.manual_seed(seed)
@@ -185,11 +186,24 @@ class HYPIRAdvancedRestoration:
                 output_image = result.squeeze(0).permute(1, 2, 0)  # (C, H, W) -> (H, W, C)
             
             status_msg = f"Success! Used prompt: {prompt}\nParameters: model_t={model_t}, coeff_t={coeff_t}, lora_rank={lora_rank}, patch_size={patch_size}\nEncode patch: {encode_patch_size}, Decode patch: {decode_patch_size}, Batch size: {batch_size}"
-            return (output_image, status_msg)
-            
+            return_value = (output_image, status_msg)
         except Exception as e:
             print(f"HYPIR advanced restoration error: {e}")
-            return (image, f"Error during restoration: {str(e)}")
+            return_value = (image, f"Error during restoration: {str(e)}")
+
+        # 卸载模型逻辑
+        if unload_model_after:
+            if self.hypir is not None:
+                try:
+                    del self.hypir
+                    self.hypir = None
+                    self.current_config = None
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception as e:
+                    print(f"Error unloading HYPIR model: {e}")
+
+        return return_value
 
 # Node mappings
 NODE_CLASS_MAPPINGS = {

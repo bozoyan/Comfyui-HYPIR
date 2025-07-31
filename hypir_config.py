@@ -29,35 +29,35 @@ def get_default_weight_path():
     return HYPIR_CONFIG["default_weight_path"]
 
 def get_base_model_path(base_model_name):
-    """获取基础模型路径，只有在ComfyUI\models\HYPIR没有基础模型文件夹时才自动下载"""
-    # 检查ComfyUI models目录下的HYPIR文件夹
+    """Get the base model path, only download if the base model folder is not in ComfyUI\models\HYPIR"""
+    # Check if the HYPIR folder exists in ComfyUI models directory
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    for i in range(5):  # 最多向上5层
+    for i in range(5):  # Up to 5 levels
         parent = os.path.dirname(current_dir)
         if os.path.exists(os.path.join(parent, "models")):
             models_dir = os.path.join(parent, "models")
             hypir_dir = os.path.join(models_dir, "HYPIR")
             
-            # 检查HYPIR目录是否存在
+            # Check if HYPIR directory exists
             if os.path.exists(hypir_dir):
-                # 如果HYPIR目录存在，检查是否有基础模型文件夹
-                # 对于stable-diffusion-2-1-base，检查是否有对应的文件夹
+                # If HYPIR directory exists, check if there is a base model folder
+                # For stable-diffusion-2-1-base, check if there is a corresponding folder
                 base_model_folder = os.path.join(hypir_dir, base_model_name)
                 if os.path.exists(base_model_folder):
-                    print(f"找到本地基础模型: {base_model_folder}")
+                    print(f"Found local base model: {base_model_folder}")
                     return base_model_folder
                 else:
-                    print(f"本地没有基础模型，将自动下载: stabilityai/{base_model_name}")
+                    print(f"Local base model not found, will automatically download: stabilityai/{base_model_name}")
                     return f"stabilityai/{base_model_name}"
             else:
-                # 如果HYPIR目录不存在，创建目录并返回原始路径（让diffusers自动下载）
+                # If HYPIR directory does not exist, create it and return the original path (let diffusers download)
                 os.makedirs(hypir_dir, exist_ok=True)
-                print(f"创建HYPIR目录: {hypir_dir}")
-                print(f"将自动下载基础模型: stabilityai/{base_model_name}")
+                print(f"Created HYPIR directory: {hypir_dir}")
+                print(f"Will automatically download base model: stabilityai/{base_model_name}")
                 return f"stabilityai/{base_model_name}"
             break
         current_dir = parent
     
-    # 如果找不到ComfyUI目录，返回原始路径
-    print(f"无法找到ComfyUI目录，使用原始路径: stabilityai/{base_model_name}")
+    # If ComfyUI directory not found, return original path
+    print(f"ComfyUI directory not found, using original path: stabilityai/{base_model_name}")
     return f"stabilityai/{base_model_name}" 
