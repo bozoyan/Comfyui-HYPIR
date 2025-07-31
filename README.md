@@ -1,3 +1,5 @@
+原项目地址https://github.com/XPixelGroup/HYPIR?tab=readme-ov-file
+
 # HYPIR ComfyUI Plugin
 
 This is a ComfyUI plugin for [HYPIR (Harnessing Diffusion-Yielded Score Priors for Image Restoration)](https://github.com/XPixelGroup/HYPIR), a state-of-the-art image restoration model based on Stable Diffusion 2.1.
