@@ -1,5 +1,4 @@
 原项目地址https://github.com/XPixelGroup/HYPIR?tab=readme-ov-file
-原项目地址：https://github.com/XPixelGroup/HYPIR?tab=readme-ov-file
 
 # HYPIR ComfyUI Plugin
 # HYPIR ComfyUI 插件
