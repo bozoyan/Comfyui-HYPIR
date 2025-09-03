@@ -50,6 +50,61 @@ except ImportError as e:
 from hypir_config import HYPIR_CONFIG, get_default_weight_path, get_base_model_path
 from model_downloader import get_hypir_model_path
 
+def get_available_devices():
+    """检测可用的设备类型"""
+    devices = ["auto"]
+    
+    # 检查 CUDA
+    if torch.cuda.is_available():
+        devices.append("cuda")
+    
+    # 检查 MPS (Apple Silicon)
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        devices.append("mps")
+    
+    # CPU 总是可用
+    devices.append("cpu")
+    
+    # 检查 DirectML (Windows)
+    try:
+        import torch_directml
+        if torch_directml.is_available():
+            devices.append("dml")
+    except ImportError:
+        pass
+    
+    return devices
+
+def get_optimal_device(preferred_device="auto"):
+    """根据偏好和可用性选择最优设备"""
+    if preferred_device == "auto":
+        # 按优先级自动选择：mps > cuda > cpu
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            return "mps"
+        elif torch.cuda.is_available():
+            return "cuda"
+        else:
+            return "cpu"
+    
+    # 验证用户选择的设备是否可用
+    if preferred_device == "cuda" and torch.cuda.is_available():
+        return "cuda"
+    elif preferred_device == "mps" and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return "mps"
+    elif preferred_device == "cpu":
+        return "cpu"
+    elif preferred_device == "dml":
+        try:
+            import torch_directml
+            if torch_directml.is_available():
+                return "dml"
+        except ImportError:
+            pass
+    
+    # 如果首选设备不可用，回退到自动选择
+    print(f"Preferred device '{preferred_device}' not available, falling back to auto selection")
+    return get_optimal_device("auto")
+
 class HYPIRAdvancedRestoration:
     """Advanced HYPIR Image Restoration Node for ComfyUI with more control options"""
     
@@ -63,6 +118,7 @@ class HYPIRAdvancedRestoration:
                 "seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
                 "model_name": (["HYPIR_sd2"],),
                 "base_model_path": (HYPIR_CONFIG["available_base_models"],),
+                "device": (get_available_devices(), {"default": "auto"}),
                 "model_t": ("INT", {"default": HYPIR_CONFIG["model_t"], "min": 1, "max": 1000}),
                 "coeff_t": ("INT", {"default": HYPIR_CONFIG["coeff_t"], "min": 1, "max": 1000}),
                 "lora_rank": ("INT", {"default": HYPIR_CONFIG["lora_rank"], "min": 1, "max": 512}),
@@ -82,11 +138,15 @@ class HYPIRAdvancedRestoration:
         self.hypir = None
         self.current_config = None
     
-    def create_enhancer(self, model_name, base_model_path, model_t, coeff_t, lora_rank):
+    def create_enhancer(self, model_name, base_model_path, model_t, coeff_t, lora_rank, device="auto"):
         """Create HYPIR enhancer with custom parameters"""
         # Check if SD2Enhancer is available
         if SD2Enhancer is None:
             raise ValueError("SD2Enhancer is not available. Please check the HYPIR installation and imports.")
+        
+        # 获取最优设备
+        selected_device = get_optimal_device(device)
+        print(f"Selected device: {selected_device} (requested: {device})")
         
         # Get model path from model name
         weight_path = get_hypir_model_path(model_name)
@@ -128,7 +188,7 @@ class HYPIRAdvancedRestoration:
                 lora_rank=lora_rank,
                 model_t=model_t,
                 coeff_t=coeff_t,
-                device="cuda" if torch.cuda.is_available() else "cpu",
+                device=selected_device,
             )
             enhancer.init_models()
             return enhancer
@@ -137,23 +197,24 @@ class HYPIRAdvancedRestoration:
             raise e
     
     def restore_image_advanced(self, image, prompt, upscale_factor, seed, model_name, 
-                             base_model_path, model_t, coeff_t, lora_rank, patch_size,
+                             base_model_path, device, model_t, coeff_t, lora_rank, patch_size,
                              encode_patch_size, decode_patch_size, batch_size, unload_model_after=False):
         # Set seed if provided
         if seed != -1:
             torch.manual_seed(seed)
-            if torch.cuda.is_available():
+            selected_device = get_optimal_device(device)
+            if selected_device == "cuda" and torch.cuda.is_available():
                 torch.cuda.manual_seed(seed)
         
         # Check if we need to create a new enhancer
         # 使用新的基础模型路径获取函数
         actual_base_model_path = get_base_model_path(base_model_path)
-        current_config = (model_name, actual_base_model_path, model_t, coeff_t, lora_rank)
+        current_config = (model_name, actual_base_model_path, model_t, coeff_t, lora_rank, device)
         if self.hypir is None or self.current_config != current_config:
             try:
-                self.hypir = self.create_enhancer(model_name, actual_base_model_path, model_t, coeff_t, lora_rank)
+                self.hypir = self.create_enhancer(model_name, actual_base_model_path, model_t, coeff_t, lora_rank, device)
                 self.current_config = current_config
-                print(f"HYPIR model loaded with custom parameters: model_t={model_t}, coeff_t={coeff_t}, lora_rank={lora_rank}")
+                print(f"HYPIR model loaded with device: {get_optimal_device(device)}, parameters: model_t={model_t}, coeff_t={coeff_t}, lora_rank={lora_rank}")
             except Exception as e:
                 return (image, f"Error loading model: {str(e)}")
         
@@ -192,7 +253,7 @@ class HYPIRAdvancedRestoration:
                     results.extend(batch_results)
                     print(f"Processed batch {batch_start//batch_size + 1}/{(total_images + batch_size - 1)//batch_size}")
                 
-                output_image = torch.stack(results, axis=0)
+                output_image = torch.stack(results, dim=0)
             else:
                 # Single image
                 # Convert to PyTorch tensor with correct format
@@ -213,7 +274,7 @@ class HYPIRAdvancedRestoration:
                 # Convert back to ComfyUI format
                 output_image = result.squeeze(0).permute(1, 2, 0)  # (C, H, W) -> (H, W, C)
             
-            status_msg = f"Success! Used prompt: {prompt}\nParameters: model_t={model_t}, coeff_t={coeff_t}, lora_rank={lora_rank}, patch_size={patch_size}\nEncode patch: {encode_patch_size}, Decode patch: {decode_patch_size}, Batch size: {batch_size}"
+            status_msg = f"Success! Used prompt: {prompt}\nDevice: {get_optimal_device(device)}\nParameters: model_t={model_t}, coeff_t={coeff_t}, lora_rank={lora_rank}, patch_size={patch_size}\nEncode patch: {encode_patch_size}, Decode patch: {decode_patch_size}, Batch size: {batch_size}"
             return_value = (output_image, status_msg)
         except Exception as e:
             print(f"HYPIR advanced restoration error: {e}")
@@ -226,8 +287,19 @@ class HYPIRAdvancedRestoration:
                     del self.hypir
                     self.hypir = None
                     self.current_config = None
-                    if torch.cuda.is_available():
+                    
+                    # 根据设备类型清理内存
+                    selected_device = get_optimal_device(device)
+                    if selected_device == "cuda" and torch.cuda.is_available():
                         torch.cuda.empty_cache()
+                    elif selected_device == "mps" and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                        torch.mps.empty_cache()
+                    elif selected_device == "dml":
+                        try:
+                            import torch_directml
+                            torch_directml.empty_cache()
+                        except:
+                            pass
                 except Exception as e:
                     print(f"Error unloading HYPIR model: {e}")
 
