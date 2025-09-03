@@ -38,7 +38,14 @@ class BaseEnhancer:
         self.model_t = model_t
         self.coeff_t = coeff_t
 
-        self.weight_dtype = torch.bfloat16
+        # MPS 兼容性处理：MPS 设备使用 float16，其他设备使用 bfloat16
+        if device == "mps":
+            self.weight_dtype = torch.float16
+            print("[MPS Compatibility] Using float16 for MPS device")
+        else:
+            self.weight_dtype = torch.bfloat16
+            print(f"[Device: {device}] Using bfloat16")
+            
         self.device = device
 
     def init_models(self):

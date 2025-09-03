@@ -80,6 +80,7 @@ def get_optimal_device(preferred_device="auto"):
     if preferred_device == "auto":
         # 按优先级自动选择：mps > cuda > cpu
         if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            # MPS 设备特殊处理：检查是否支持大尺寸图像
             return "mps"
         elif torch.cuda.is_available():
             return "cuda"
@@ -104,6 +105,27 @@ def get_optimal_device(preferred_device="auto"):
     # 如果首选设备不可用，回退到自动选择
     print(f"Preferred device '{preferred_device}' not available, falling back to auto selection")
     return get_optimal_device("auto")
+
+def check_mps_compatibility(device, image_size=None):
+    """检查 MPS 设备兼容性并提供建议"""
+    if device != "mps":
+        return device, None
+    
+    warnings = []
+    
+    # 检查图像尺寸
+    if image_size is not None:
+        h, w = image_size
+        total_pixels = h * w
+        if total_pixels > 2048 * 2048:
+            warnings.append(f"Large image detected ({h}x{w}). MPS may have compatibility issues with very large images.")
+            warnings.append("Consider using smaller tile sizes (encode_patch_size, decode_patch_size < 1024) or switch to CPU.")
+    
+    # MPS 特殊提示
+    warnings.append("[MPS Device] Using optimized settings for Apple Silicon GPU.")
+    warnings.append("[MPS Device] If you encounter errors, try: 1) Reduce tile sizes 2) Switch to CPU device")
+    
+    return device, warnings
 
 class HYPIRAdvancedRestoration:
     """Advanced HYPIR Image Restoration Node for ComfyUI with more control options"""
@@ -399,17 +421,47 @@ class HYPIRAdvancedRestorationWithDevice:
             if selected_device == "cuda" and torch.cuda.is_available():
                 torch.cuda.manual_seed(seed)
         
+        # MPS 兼容性检查
+        selected_device = get_optimal_device(device)
+        image_size = None
+        if len(image.shape) >= 3:
+            image_size = (image.shape[-3], image.shape[-2]) if len(image.shape) == 4 else (image.shape[-2], image.shape[-1])
+        
+        device_to_use, warnings = check_mps_compatibility(selected_device, image_size)
+        if warnings:
+            for warning in warnings:
+                print(warning)
+        
+        # 如果是 MPS 设备且图像很大，自动调整参数
+        if device_to_use == "mps" and image_size and image_size[0] * image_size[1] > 1536 * 1536:
+            # 为 MPS 设备和大图像优化参数
+            encode_patch_size = min(encode_patch_size, 768)
+            decode_patch_size = min(decode_patch_size, 768)
+            print(f"[MPS Optimization] Adjusted tile sizes to encode: {encode_patch_size}, decode: {decode_patch_size}")
+        
         # Check if we need to create a new enhancer
         # 使用新的基础模型路径获取函数
         actual_base_model_path = get_base_model_path(base_model_path)
-        current_config = (model_name, actual_base_model_path, model_t, coeff_t, lora_rank, device)
+        current_config = (model_name, actual_base_model_path, model_t, coeff_t, lora_rank, device_to_use)
         if self.hypir is None or self.current_config != current_config:
             try:
-                self.hypir = self.create_enhancer(model_name, actual_base_model_path, model_t, coeff_t, lora_rank, device)
+                self.hypir = self.create_enhancer(model_name, actual_base_model_path, model_t, coeff_t, lora_rank, device_to_use)
                 self.current_config = current_config
-                print(f"HYPIR model loaded with device: {get_optimal_device(device)}, parameters: model_t={model_t}, coeff_t={coeff_t}, lora_rank={lora_rank}")
+                print(f"HYPIR model loaded with device: {device_to_use}, parameters: model_t={model_t}, coeff_t={coeff_t}, lora_rank={lora_rank}")
             except Exception as e:
-                return (image, f"Error loading model: {str(e)}")
+                # MPS 设备出错时尝试回退到 CPU
+                if device_to_use == "mps":
+                    print(f"[MPS Error] Model loading failed on MPS device: {e}")
+                    print("[MPS Fallback] Trying to fallback to CPU device...")
+                    try:
+                        device_to_use = "cpu"
+                        self.hypir = self.create_enhancer(model_name, actual_base_model_path, model_t, coeff_t, lora_rank, "cpu")
+                        self.current_config = (model_name, actual_base_model_path, model_t, coeff_t, lora_rank, "cpu")
+                        print(f"[MPS Fallback] Successfully loaded model on CPU device")
+                    except Exception as e2:
+                        return (image, f"Error loading model on both MPS and CPU: MPS={str(e)}, CPU={str(e2)}")
+                else:
+                    return (image, f"Error loading model: {str(e)}")
         
         try:
             # Convert image to format expected by HYPIR
@@ -467,11 +519,19 @@ class HYPIRAdvancedRestorationWithDevice:
                 # Convert back to ComfyUI format
                 output_image = result.squeeze(0).permute(1, 2, 0)  # (C, H, W) -> (H, W, C)
             
-            status_msg = f"Success! Used prompt: {prompt}\nDevice: {get_optimal_device(device)}\nParameters: model_t={model_t}, coeff_t={coeff_t}, lora_rank={lora_rank}, patch_size={patch_size}\nEncode patch: {encode_patch_size}, Decode patch: {decode_patch_size}, Batch size: {batch_size}"
+            status_msg = f"Success! Used prompt: {prompt}\nDevice: {device_to_use}\nParameters: model_t={model_t}, coeff_t={coeff_t}, lora_rank={lora_rank}, patch_size={patch_size}\nEncode patch: {encode_patch_size}, Decode patch: {decode_patch_size}, Batch size: {batch_size}"
             return_value = (output_image, status_msg)
         except Exception as e:
-            print(f"HYPIR advanced restoration error: {e}")
-            return_value = (image, f"Error during restoration: {str(e)}")
+            error_msg = str(e)
+            print(f"HYPIR advanced restoration error: {error_msg}")
+            
+            # MPS 特殊错误处理
+            if device_to_use == "mps" and ("mps" in error_msg.lower() or "normalization" in error_msg.lower() or "broadcast" in error_msg.lower()):
+                print("[MPS Error] Detected MPS-specific error. This is likely due to MPS compatibility issues with large images or certain tensor operations.")
+                print("[MPS Suggestion] Try: 1) Reduce encode_patch_size and decode_patch_size to 512 or lower 2) Switch to CPU device 3) Use smaller images")
+                return_value = (image, f"MPS Compatibility Error: {error_msg}\n\nSuggestions:\n1. Reduce tile sizes (encode_patch_size, decode_patch_size ≤ 512)\n2. Switch to CPU device\n3. Process smaller images")
+            else:
+                return_value = (image, f"Error during restoration: {error_msg}")
 
         # 卸载模型逻辑
         if unload_model_after:
@@ -482,12 +542,11 @@ class HYPIRAdvancedRestorationWithDevice:
                     self.current_config = None
                     
                     # 根据设备类型清理内存
-                    selected_device = get_optimal_device(device)
-                    if selected_device == "cuda" and torch.cuda.is_available():
+                    if device_to_use == "cuda" and torch.cuda.is_available():
                         torch.cuda.empty_cache()
-                    elif selected_device == "mps" and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                    elif device_to_use == "mps" and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
                         torch.mps.empty_cache()
-                    elif selected_device == "dml":
+                    elif device_to_use == "dml":
                         try:
                             import torch_directml
                             torch_directml.empty_cache()
