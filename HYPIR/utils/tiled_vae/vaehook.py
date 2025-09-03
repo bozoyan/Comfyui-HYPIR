@@ -372,7 +372,19 @@ def get_var_mean(input, num_groups, eps=1e-6):
     Get mean and var for group norm
     """
     b, c = input.size(0), input.size(1)
+    
+    # 处理特殊情况：当通道数小于组数时，调整组数
+    if c < num_groups:
+        num_groups = c
+        print(f"[VAE Fix] Adjusted num_groups from 32 to {num_groups} for {c} channels")
+    
     channel_in_group = int(c/num_groups)
+    if channel_in_group == 0:
+        # 如果仍然为 0，使用所有通道作为一组
+        num_groups = 1
+        channel_in_group = c
+        print(f"[VAE Fix] Using single group for {c} channels")
+    
     input_reshaped = input.contiguous().view(
         1, int(b * num_groups), channel_in_group, *input.size()[2:])
     var, mean = torch.var_mean(
@@ -394,15 +406,61 @@ def custom_group_norm(input, num_groups, mean, var, weight=None, bias=None, eps=
 
     @return: normalized tensor
     """
+    # MPS 设备数据类型兼容性处理
+    if input.device.type == 'mps':
+        # 确保所有参数的数据类型与输入一致
+        target_dtype = input.dtype
+        if mean.dtype != target_dtype:
+            mean = mean.to(target_dtype)
+        if var.dtype != target_dtype:
+            var = var.to(target_dtype)
+        # 如果 weight 和 bias 存在，也要确保数据类型一致
+        if weight is not None and weight.dtype != target_dtype:
+            weight = weight.to(target_dtype)
+        if bias is not None and bias.dtype != target_dtype:
+            bias = bias.to(target_dtype)
+    
     b, c = input.size(0), input.size(1)
+    
+    # 处理特殊情况：当通道数小于组数时，调整组数
+    if c < num_groups:
+        num_groups = c
+    
     channel_in_group = int(c/num_groups)
+    if channel_in_group == 0:
+        num_groups = 1
+        channel_in_group = c
+    
+    # 计算实际的组数（根据 mean/var 的大小）
+    actual_num_groups = mean.size(0)
+    if actual_num_groups != num_groups:
+        num_groups = actual_num_groups
+        channel_in_group = int(c / num_groups) if num_groups > 0 else c
+    
     input_reshaped = input.contiguous().view(
         1, int(b * num_groups), channel_in_group, *input.size()[2:])
 
-    out = F.batch_norm(input_reshaped, mean, var, weight=None, bias=None,
-                       training=False, momentum=0, eps=eps)
-
-    out = out.view(b, c, *input.size()[2:])
+    # MPS 特殊处理：使用 group_norm 替代 batch_norm 以避免数据类型不兼容
+    if input.device.type == 'mps':
+        # 在 MPS 设备上，直接实现 group normalization 以避免 batch_norm 的数据类型问题
+        # 重塑输入以便进行 group norm 计算
+        input_grouped = input.view(b, num_groups, channel_in_group, *input.size()[2:])
+        
+        # mean 和 var 从 get_var_mean 得到的形状是 [b * num_groups]
+        # 需要重塑为正确的形状以便广播
+        mean_reshaped = mean.view(1, num_groups, 1, 1, 1)  # [1, num_groups, 1, 1, 1]
+        var_reshaped = var.view(1, num_groups, 1, 1, 1)    # [1, num_groups, 1, 1, 1]
+        
+        # 归一化：input_grouped shape: [b, num_groups, channel_in_group, H, W]
+        normalized = (input_grouped - mean_reshaped) / torch.sqrt(var_reshaped + eps)
+        
+        # 重塑回原始形状
+        out = normalized.view(b, c, *input.size()[2:])
+    else:
+        # 非 MPS 设备使用原始的 batch_norm 实现
+        out = F.batch_norm(input_reshaped, mean, var, weight=None, bias=None,
+                           training=False, momentum=0, eps=eps)
+        out = out.view(b, c, *input.size()[2:])
 
     # post affine transform
     if weight is not None:
@@ -521,6 +579,17 @@ class GroupNormParam:
                 var = torch.clamp(var, 0, 60000)
                 var = var.half()
                 mean = mean.half()
+        
+        # MPS 设备特殊处理：确保数据类型一致性
+        if tile.device.type == 'mps':
+            # 在 MPS 设备上，确保 mean 和 var 与输入 tile 数据类型一致
+            target_dtype = tile.dtype
+            if var.dtype != target_dtype:
+                var = var.to(target_dtype)
+            if mean.dtype != target_dtype:
+                mean = mean.to(target_dtype)
+            print(f"[MPS VAE Fix] Ensured data type consistency: tile={tile.dtype}, mean={mean.dtype}, var={var.dtype}")
+        
         if hasattr(norm, 'weight'):
             weight = norm.weight
             bias = norm.bias
