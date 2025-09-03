@@ -45,7 +45,6 @@ def wavelet_blur(image: Tensor, radius: int):
     kernel = kernel[None, None]
     # repeat the kernel across all input channels
     kernel = kernel.repeat(3, 1, 1, 1)
-    image = F.pad(image, (radius, radius, radius, radius), mode='replicate')
     
     # MPS 设备特殊处理：避免 dilation 操作导致的 NaN
     if image.device.type == 'mps':
@@ -58,8 +57,18 @@ def wavelet_blur(image: Tensor, radius: int):
         if torch.isnan(output).any():
             print("[Wavelet Blur MPS] Detected NaN in blur result, using input as fallback")
             output = image
+        
+        # 检查结果中的无穷大值
+        if torch.isinf(output).any():
+            print("[Wavelet Blur MPS] Detected inf in blur result, clamping")
+            output = torch.nan_to_num(output, posinf=1.0, neginf=0.0)
+        
+        # 确保数值范围合理
+        output = output.clamp(0, 1)
+        
     else:
         # 非 MPS 设备使用原始的 dilation 实现
+        image = F.pad(image, (radius, radius, radius, radius), mode='replicate')
         output = F.conv2d(image, kernel, groups=3, dilation=radius)
     
     return output
@@ -109,12 +118,59 @@ def wavelet_reconstruction(content_feat:Tensor, style_feat:Tensor):
     """
     Apply wavelet decomposition, so that the content will have the same color as the style.
     """
+    # 确保两个输入具有相同的尺寸
+    if content_feat.shape != style_feat.shape:
+        print(f"[Wavelet] Shape mismatch: content {content_feat.shape} vs style {style_feat.shape}")
+        # 将 style_feat 调整为 content_feat 的尺寸
+        
+        # MPS 设备的 float16 + bicubic 兼容性修复
+        if style_feat.device.type == 'mps' and style_feat.dtype == torch.float16:
+            # 在 MPS 上，临时转换为 float32 进行插值，然后转回 float16
+            style_feat_f32 = style_feat.float()
+            style_feat_resized = torch.nn.functional.interpolate(
+                style_feat_f32, 
+                size=content_feat.shape[2:], 
+                mode="bicubic", 
+                antialias=True
+            )
+            style_feat = style_feat_resized.half()
+        else:
+            style_feat = torch.nn.functional.interpolate(
+                style_feat, 
+                size=content_feat.shape[2:], 
+                mode="bicubic", 
+                antialias=True
+            )
+        print(f"[Wavelet] Resized style_feat to {style_feat.shape}")
+    
+    # 检查输入是否包含 NaN 或 inf
+    if torch.isnan(content_feat).any() or torch.isinf(content_feat).any():
+        print("[Wavelet] Input content_feat contains NaN/inf, cleaning...")
+        content_feat = torch.nan_to_num(content_feat, nan=0.0, posinf=1.0, neginf=0.0)
+        content_feat = content_feat.clamp(0, 1)
+    
+    if torch.isnan(style_feat).any() or torch.isinf(style_feat).any():
+        print("[Wavelet] Input style_feat contains NaN/inf, cleaning...")
+        style_feat = torch.nan_to_num(style_feat, nan=0.0, posinf=1.0, neginf=0.0)
+        style_feat = style_feat.clamp(0, 1)
+    
     # calculate the wavelet decomposition of the content feature
     content_high_freq, content_low_freq = wavelet_decomposition(content_feat)
     del content_low_freq
     # calculate the wavelet decomposition of the style feature
     style_high_freq, style_low_freq = wavelet_decomposition(style_feat)
     del style_high_freq
+    
+    # 检查 wavelet decomposition 的结果
+    if torch.isnan(content_high_freq).any() or torch.isnan(style_low_freq).any():
+        print("[Wavelet] NaN detected in decomposition results, using fallback")
+        if torch.isnan(content_high_freq).any():
+            print("[Wavelet] content_high_freq contains NaN, using content_feat")
+            content_high_freq = content_feat
+        if torch.isnan(style_low_freq).any():
+            print("[Wavelet] style_low_freq contains NaN, using style_feat")
+            style_low_freq = style_feat
+    
     # reconstruct the content feature with the style's high frequency
     result = content_high_freq + style_low_freq
     
@@ -129,10 +185,10 @@ def wavelet_reconstruction(content_feat:Tensor, style_feat:Tensor):
             # 先尝试修复 NaN 值，但保持有意义的数值
             result = torch.nan_to_num(result, nan=0.0, posinf=1.0, neginf=0.0)
             
-            # 如果结果仍然全为 0，则使用 content_high_freq 作为回退
+            # 如果结果仍然全为 0，则使用 content_feat 作为回退
             if result.abs().max() < 1e-6:
-                print("[Wavelet MPS] Result is all zeros, using content_high_freq as fallback")
-                result = content_high_freq.clamp(0, 1)
+                print("[Wavelet MPS] Result is all zeros, using content_feat as fallback")
+                result = content_feat.clamp(0, 1)
         
         if torch.isinf(result).any():
             print("[Wavelet MPS] Detected infinity values in wavelet reconstruction, clamping")

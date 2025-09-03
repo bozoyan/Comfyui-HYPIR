@@ -134,8 +134,27 @@ class BaseEnhancer:
             x = self.vae.decode(z.to(self.weight_dtype)).sample.float()
         x = x[..., :h1, :w1]
         x = (x + 1) / 2
-        x = F.interpolate(input=x, size=(h0, w0), mode="bicubic", antialias=True)
-        x = wavelet_reconstruction(x, ref.to(device=self.device))
+        
+        # MPS 设备的 float16 + bicubic 兼容性修复
+        if self.device == "mps" and x.dtype == torch.float16:
+            # 在 MPS 上，临时转换为 float32 进行插值，然后转回 float16
+            x_f32 = x.float()
+            x = F.interpolate(input=x_f32, size=(h0, w0), mode="bicubic", antialias=True).half()
+        else:
+            x = F.interpolate(input=x, size=(h0, w0), mode="bicubic", antialias=True)
+        
+        # 确保 x 和 ref 的尺寸完全匹配
+        ref_device = ref.to(device=self.device)
+        if x.shape != ref_device.shape:
+            print(f"[Size Fix] Resizing x from {x.shape} to match ref {ref_device.shape}")
+            if self.device == "mps" and x.dtype == torch.float16:
+                # MPS float16 兼容性处理
+                x_f32 = x.float()
+                x = F.interpolate(x_f32, size=ref_device.shape[2:], mode="bicubic", antialias=True).half()
+            else:
+                x = F.interpolate(x, size=ref_device.shape[2:], mode="bicubic", antialias=True)
+        
+        x = wavelet_reconstruction(x, ref_device)
 
         if return_type == "pt":
             # MPS 设备数值稳定性检查
