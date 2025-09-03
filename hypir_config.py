@@ -22,6 +22,10 @@ HYPIR_CONFIG = {
     ],
     "patch_size": 512,
     "vae_scale_factor": 8,
+    # 自定义模型路径配置
+    "custom_model_paths": {
+        "stable-diffusion-2-1-base": "/Volumes/BO/AI/models/HYPIR/stable-diffusion-2-1-base"
+    }
 }
 
 def get_default_weight_path():
@@ -29,7 +33,17 @@ def get_default_weight_path():
     return HYPIR_CONFIG["default_weight_path"]
 
 def get_base_model_path(base_model_name):
-    """Get the base model path, only download if the base model folder is not in ComfyUI\models\HYPIR"""
+    """Get the base model path, check custom paths first, then ComfyUI models directory"""
+    # 首先检查自定义路径配置
+    custom_paths = HYPIR_CONFIG.get("custom_model_paths", {})
+    if base_model_name in custom_paths:
+        custom_path = custom_paths[base_model_name]
+        if os.path.exists(custom_path):
+            print(f"Found custom base model: {custom_path}")
+            return custom_path
+        else:
+            print(f"Custom path configured but model not found: {custom_path}")
+    
     # Check if the HYPIR folder exists in ComfyUI models directory
     current_dir = os.path.dirname(os.path.abspath(__file__))
     for i in range(5):  # Up to 5 levels
