@@ -1,10 +1,8 @@
-原项目地址https://github.com/XPixelGroup/HYPIR?tab=readme-ov-file
-
 # HYPIR ComfyUI Plugin
 # HYPIR ComfyUI 插件
 
-This is a ComfyUI plugin for [HYPIR (Harnessing Diffusion-Yielded Score Priors for Image Restoration)](https://github.com/XPixelGroup/HYPIR), a state-of-the-art image restoration model based on Stable Diffusion 2.1.
-这是一个用于 [HYPIR（利用扩散得分先验进行图像修复）](https://github.com/XPixelGroup/HYPIR) 的 ComfyUI 插件，HYPIR 是基于 Stable Diffusion 2.1 的先进图像修复模型。
+This is a ComfyUI plugin for [HYPIR (Harnessing Diffusion-Yielded Score Priors for Image Restoration)](https://github.com/bozoyan/HYPIR), a state-of-the-art image restoration model based on Stable Diffusion 2.1.
+这是一个用于 [HYPIR（利用扩散得分先验进行图像修复）](https://github.com/bozoyan/HYPIR) 的 ComfyUI 插件，HYPIR 是基于 Stable Diffusion 2.1 的先进图像修复模型。
 
 ## Features
 ## 功能特性
@@ -73,9 +71,7 @@ ComfyUI/models/HYPIR/stable-diffusion-2-1-base/
 If you prefer to download manually, you can get the HYPIR model from:
 如果你希望手动下载，可以从以下地址获取 HYPIR 模型：
 - **HuggingFace**: [HYPIR_sd2.pth](https://huggingface.co/lxq007/HYPIR/tree/main)
-- **HuggingFace**：[HYPIR_sd2.pth](https://huggingface.co/lxq007/HYPIR/tree/main)
 - **OpenXLab**: [HYPIR_sd2.pth](https://openxlab.org.cn/models/detail/linxqi/HYPIR/tree/main)
-- **OpenXLab**：[HYPIR_sd2.pth](https://openxlab.org.cn/models/detail/linxqi/HYPIR/tree/main)
 
 Place the `HYPIR_sd2.pth` file in:
 请将 `HYPIR_sd2.pth` 文件放在以下任一位置：
@@ -91,7 +87,6 @@ Place the `HYPIR_sd2.pth` file in:
 The base Stable Diffusion 2.1 model can be downloaded manually from:
 基础 Stable Diffusion 2.1 模型可从以下地址手动下载：
 - **HuggingFace**: [stable-diffusion-2-1-base](https://huggingface.co/stabilityai/stable-diffusion-2-1-base)
-- **HuggingFace**：[stable-diffusion-2-1-base](https://huggingface.co/stabilityai/stable-diffusion-2-1-base)
 
 Place the base model in:
 请将基础模型放在：
@@ -252,6 +247,15 @@ This plugin is provided under the same license as the original HYPIR project. Pl
 
 ## Acknowledgments
 ## 致谢
+*：通讯作者
+
+1 中国科学院深圳先进技术研究院
+2 中国科学院大学
+3 香港中文大学
+4 商汤科技研究院
+5 香港都市大学
+6 索非亚国立理工学院
+7 深圳先进技术大学
 
 - Original HYPIR implementation by [XPixelGroup](https://github.com/XPixelGroup/HYPIR)
 - HYPIR 原始实现：[XPixelGroup](https://github.com/XPixelGroup/HYPIR)
