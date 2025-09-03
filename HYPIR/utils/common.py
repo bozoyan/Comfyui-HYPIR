@@ -46,8 +46,22 @@ def wavelet_blur(image: Tensor, radius: int):
     # repeat the kernel across all input channels
     kernel = kernel.repeat(3, 1, 1, 1)
     image = F.pad(image, (radius, radius, radius, radius), mode='replicate')
-    # apply convolution
-    output = F.conv2d(image, kernel, groups=3, dilation=radius)
+    
+    # MPS 设备特殊处理：避免 dilation 操作导致的 NaN
+    if image.device.type == 'mps':
+        # 在 MPS 设备上，使用多次普通卷积替代 dilation
+        output = image
+        for _ in range(radius):
+            output = F.conv2d(output, kernel, groups=3, padding=1)
+        
+        # 检查结果中的 NaN 值
+        if torch.isnan(output).any():
+            print("[Wavelet Blur MPS] Detected NaN in blur result, using input as fallback")
+            output = image
+    else:
+        # 非 MPS 设备使用原始的 dilation 实现
+        output = F.conv2d(image, kernel, groups=3, dilation=radius)
+    
     return output
 
 
@@ -60,8 +74,33 @@ def wavelet_decomposition(image: Tensor, levels=5):
     for i in range(levels):
         radius = 2 ** i
         low_freq = wavelet_blur(image, radius)
-        high_freq += (image - low_freq)
+        
+        # MPS 设备数值稳定性检查
+        if image.device.type == 'mps':
+            if torch.isnan(low_freq).any():
+                print(f"[Wavelet Decomposition MPS] NaN detected at level {i}, using image as low_freq")
+                low_freq = image
+            
+            diff = image - low_freq
+            if torch.isnan(diff).any():
+                print(f"[Wavelet Decomposition MPS] NaN in difference at level {i}, skipping")
+                diff = torch.zeros_like(image)
+            
+            high_freq += diff
+        else:
+            high_freq += (image - low_freq)
+        
         image = low_freq
+    
+    # 最终检查
+    if image.device.type == 'mps':
+        if torch.isnan(high_freq).any():
+            print("[Wavelet Decomposition MPS] Final high_freq contains NaN, replacing with zeros")
+            high_freq = torch.zeros_like(high_freq)
+        
+        if torch.isnan(low_freq).any():
+            print("[Wavelet Decomposition MPS] Final low_freq contains NaN, using original image")
+            low_freq = image
 
     return high_freq, low_freq
 
