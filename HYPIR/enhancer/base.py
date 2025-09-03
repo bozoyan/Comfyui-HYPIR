@@ -6,8 +6,17 @@ import numpy as np
 from PIL import Image
 from diffusers import AutoencoderKL
 
-from HYPIR.utils.common import wavelet_reconstruction, make_tiled_fn
-from HYPIR.utils.tiled_vae import enable_tiled_vae
+try:
+    from HYPIR.utils.common import wavelet_reconstruction, make_tiled_fn
+    from HYPIR.utils.tiled_vae import enable_tiled_vae
+except ImportError:
+    # Try relative imports if absolute imports fail
+    try:
+        from ..utils.common import wavelet_reconstruction, make_tiled_fn
+        from ..utils.tiled_vae import enable_tiled_vae
+    except ImportError:
+        # If all imports fail, raise a more informative error
+        raise ImportError("Could not import HYPIR utils modules. Please check the installation.")
 
 
 class BaseEnhancer:

@@ -5,14 +5,35 @@ from functools import lru_cache
 import torch
 #from modules import errors
 
+# Try to import ComfyUI modules, but handle gracefully if not available
+mac_specific = None
 if sys.platform == "darwin":
-    from modules import mac_specific
+    try:
+        from modules import mac_specific
+    except ImportError:
+        # Create a fallback mac_specific module if ComfyUI modules not available
+        class FallbackMacSpecific:
+            @property
+            def has_mps(self):
+                return hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
+            
+            def torch_mps_gc(self):
+                # Fallback MPS garbage collection
+                if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                    try:
+                        torch.mps.empty_cache()
+                    except:
+                        pass
+        
+        mac_specific = FallbackMacSpecific()
 
 
 def has_mps() -> bool:
     if sys.platform != "darwin":
         return False
     else:
+        if mac_specific is None:
+            return hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
         return mac_specific.has_mps
 
 
@@ -46,7 +67,14 @@ def torch_gc():
             torch.cuda.ipc_collect()
 
     if has_mps():
-        mac_specific.torch_mps_gc()
+        if mac_specific is not None:
+            mac_specific.torch_mps_gc()
+        else:
+            # Fallback MPS garbage collection
+            try:
+                torch.mps.empty_cache()
+            except:
+                pass
 
 
 def enable_tf32():

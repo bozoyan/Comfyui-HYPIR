@@ -17,11 +17,35 @@ HYPIR_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "HYPIR")
 if HYPIR_PATH not in sys.path:
     sys.path.append(HYPIR_PATH)
 
+# Import SD2Enhancer with better error handling
+SD2Enhancer = None
 try:
     from HYPIR.enhancer.sd2 import SD2Enhancer
+    print("Successfully imported SD2Enhancer")
 except ImportError as e:
-    print(f"Error importing HYPIR: {e}")
+    print(f"Error importing HYPIR.enhancer.sd2: {e}")
     print("Please make sure HYPIR is properly installed in the HYPIR folder")
+    print("Trying alternative import...")
+    try:
+        # Try direct import from sd2 module
+        import sys
+        import os
+        sd2_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "HYPIR", "enhancer", "sd2.py")
+        if os.path.exists(sd2_path):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("sd2", sd2_path)
+            if spec is not None and spec.loader is not None:
+                sd2_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(sd2_module)
+                SD2Enhancer = sd2_module.SD2Enhancer
+                print("Successfully imported SD2Enhancer via direct module loading")
+            else:
+                print(f"Could not create module spec for {sd2_path}")
+        else:
+            print(f"sd2.py not found at {sd2_path}")
+    except Exception as e2:
+        print(f"Alternative import also failed: {e2}")
+        SD2Enhancer = None
 
 from hypir_config import HYPIR_CONFIG, get_default_weight_path, get_base_model_path
 from model_downloader import get_hypir_model_path
@@ -60,6 +84,10 @@ class HYPIRAdvancedRestoration:
     
     def create_enhancer(self, model_name, base_model_path, model_t, coeff_t, lora_rank):
         """Create HYPIR enhancer with custom parameters"""
+        # Check if SD2Enhancer is available
+        if SD2Enhancer is None:
+            raise ValueError("SD2Enhancer is not available. Please check the HYPIR installation and imports.")
+        
         # Get model path from model name
         weight_path = get_hypir_model_path(model_name)
         if not weight_path:

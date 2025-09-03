@@ -1,5 +1,8 @@
 from contextlib import contextmanager
-from HYPIR.utils.tiled_vae.vaehook import VAEHook
+try:
+    from HYPIR.utils.tiled_vae.vaehook import VAEHook
+except ImportError:
+    from .vaehook import VAEHook
 
 
 @contextmanager
