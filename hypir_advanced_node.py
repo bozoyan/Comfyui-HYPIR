@@ -516,6 +516,30 @@ class HYPIRAdvancedRestorationWithDevice:
                     decode_patch_size=decode_patch_size,
                     return_type="pt"
                 )
+                
+                # MPS 设备数值稳定性检查和修复
+                if device_to_use == "mps":
+                    # 检查 NaN 和无穷大值
+                    if torch.isnan(result).any():
+                        print("[MPS Fix] Detected NaN values in result, replacing with zeros")
+                        result = torch.nan_to_num(result, nan=0.0)
+                    
+                    if torch.isinf(result).any():
+                        print("[MPS Fix] Detected infinity values in result, clamping")
+                        result = torch.nan_to_num(result, posinf=1.0, neginf=0.0)
+                    
+                    # 确保值在正确范围内
+                    result = result.clamp(0, 1)
+                    
+                    # 输出诊断信息
+                    result_min, result_max, result_mean = result.min().item(), result.max().item(), result.mean().item()
+                    print(f"[MPS Debug] Result stats: min={result_min:.6f}, max={result_max:.6f}, mean={result_mean:.6f}")
+                    
+                    # 检查是否为纯黑色图像
+                    if result_max < 0.01:
+                        print("[MPS Warning] Result appears to be very dark or black. This might indicate a processing issue.")
+                        print("[MPS Suggestion] Try reducing tile sizes or switching to CPU device.")
+                
                 # Convert back to ComfyUI format
                 output_image = result.squeeze(0).permute(1, 2, 0)  # (C, H, W) -> (H, W, C)
             

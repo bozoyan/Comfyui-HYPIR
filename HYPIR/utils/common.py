@@ -77,7 +77,32 @@ def wavelet_reconstruction(content_feat:Tensor, style_feat:Tensor):
     style_high_freq, style_low_freq = wavelet_decomposition(style_feat)
     del style_high_freq
     # reconstruct the content feature with the style's high frequency
-    return content_high_freq + style_low_freq
+    result = content_high_freq + style_low_freq
+    
+    # MPS 设备数值稳定性检查
+    if result.device.type == 'mps':
+        # 检查 NaN 和无穷大值
+        if torch.isnan(result).any():
+            print("[Wavelet MPS] Detected NaN values in wavelet reconstruction")
+            print(f"[Wavelet MPS] content_high_freq stats: min={content_high_freq.min():.6f}, max={content_high_freq.max():.6f}")
+            print(f"[Wavelet MPS] style_low_freq stats: min={style_low_freq.min():.6f}, max={style_low_freq.max():.6f}")
+            
+            # 先尝试修复 NaN 值，但保持有意义的数值
+            result = torch.nan_to_num(result, nan=0.0, posinf=1.0, neginf=0.0)
+            
+            # 如果结果仍然全为 0，则使用 content_high_freq 作为回退
+            if result.abs().max() < 1e-6:
+                print("[Wavelet MPS] Result is all zeros, using content_high_freq as fallback")
+                result = content_high_freq.clamp(0, 1)
+        
+        if torch.isinf(result).any():
+            print("[Wavelet MPS] Detected infinity values in wavelet reconstruction, clamping")
+            result = torch.nan_to_num(result, posinf=1.0, neginf=0.0)
+        
+        # 最终的数值范围检查
+        result = result.clamp(0, 1)
+    
+    return result
 
 
 # https://github.com/XPixelGroup/BasicSR/blob/master/basicsr/utils/download_util.py/

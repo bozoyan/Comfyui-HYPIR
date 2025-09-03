@@ -138,6 +138,20 @@ class BaseEnhancer:
         x = wavelet_reconstruction(x, ref.to(device=self.device))
 
         if return_type == "pt":
+            # MPS 设备数值稳定性检查
+            if self.device == "mps":
+                # 检查 NaN 和无穷大值
+                if torch.isnan(x).any():
+                    print("[BaseEnhancer MPS] Detected NaN values in output, replacing with zeros")
+                    x = torch.nan_to_num(x, nan=0.0)
+                
+                if torch.isinf(x).any():
+                    print("[BaseEnhancer MPS] Detected infinity values in output, clamping")
+                    x = torch.nan_to_num(x, posinf=1.0, neginf=0.0)
+                
+                # 确保最终输出在正确范围内
+                x = x.clamp(0, 1)
+            
             return x.clamp(0, 1).cpu()
         elif return_type == "np":
             return self.tensor2image(x)
